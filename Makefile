@@ -1,51 +1,66 @@
-CC = gcc
-LD = ld
-OBJCOPY = objcopy
+# EDK II configuration
+EDK2_DIR  ?= $(HOME)/development/edk2
+WORKSPACE := $(CURDIR)
+CONF_PATH := $(WORKSPACE)/Conf
 
-SRC_DIR = src
-BLD_DIR = build
-INC_DIR = include
+# Search roots for packages:
+# parent directory contains UEFI-password-manager/
+# EDK2_DIR contains MdePkg/, MdeModulePkg/, etc.
+PACKAGES_PATH := $(abspath ..):$(EDK2_DIR)
 
-TARGET = $(BLD_DIR)/passmanager.efi
-CFLAGS = -Wall -Wextra -O0 \
-         -I/usr/include/efi \
-         -I/usr/include/efi/x86_64 \
-         -fpic -ffreestanding \
-         -fno-stack-protector -fno-stack-check \
-         -fshort-wchar -mno-red-zone \
-         -maccumulate-outgoing-args
+# Build configuration
+ARCH      ?= X64
+TARGET    ?= DEBUG
+TOOLCHAIN ?= GCC
+PLATFORM  ?= UEFIPasswordManager.dsc
 
-LDFLAGS = -nostdlib -znocombreloc \
-          -T /usr/lib/elf_x86_64_efi.lds \
-          -shared -Bsymbolic
+# Prepare EDK II environment in a child Bash process
+EDK_ENV = WORKSPACE="$(WORKSPACE)" \
+          CONF_PATH="$(CONF_PATH)" \
+          EDK_TOOLS_PATH="$(EDK2_DIR)/BaseTools" \
+          PACKAGES_PATH="$(PACKAGES_PATH)"
 
-EFI_CRT = /usr/lib/crt0-efi-x86_64.o
-EFI_LIBS = -L/usr/lib -lefi -lgnuefi
+# QEMU / OVMF
+QEMU       ?= qemu-system-x86_64
+OVMF_CODE  ?= /usr/share/OVMF/OVMF_CODE_4M.fd
+OVMF_VARS_TEMPLATE ?= /usr/share/OVMF/OVMF_VARS_4M.fd
 
-SRC = $(wildcard $(SRC_DIR)/*.c)
-OBJ = $(patsubst $(SRC_DIR)/%.c,$(BLD_DIR)/%.o,$(SRC))
+ESP_DIR    := $(WORKSPACE)/test/esp
+OVMF_VARS  := $(WORKSPACE)/test/OVMF_VARS_4M.fd
 
-all: $(TARGET)
+EFI_APP    := $(WORKSPACE)/Build/$(TARGET)_$(TOOLCHAIN)/$(ARCH)/PassManager.efi
+EFI_BOOT   := $(ESP_DIR)/EFI/BOOT/BOOTX64.EFI
 
-$(TARGET): $(OBJ)
-	$(LD) $(LDFLAGS) $(EFI_CRT) $(OBJ) $(EFI_LIBS) -o $(BLD_DIR)/passmanager.so
-	$(OBJCOPY) -j .text -j .sdata -j .data -j .dynamic -j .dynsym -j .rel -j .rela -j .reloc --target=efi-app-x86_64 $(BLD_DIR)/passmanager.so $@
+all: build
 
-$(BLD_DIR)/%.o: $(SRC_DIR)/%.c
-	mkdir -p $(BLD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
+# Initialize EDK II configuration
+config:
+	mkdir -p "$(CONF_PATH)"
+	$(EDK_ENV) bash -c 'source "$(EDK2_DIR)/edksetup.sh"'
 
+# Build our UEFI application
+build: config
+	$(EDK_ENV) bash -c 'source "$(EDK2_DIR)/edksetup.sh" && \
+		build -p "$(PLATFORM)" \
+		      -a "$(ARCH)" \
+		      -t "$(TOOLCHAIN)" \
+		      -b "$(TARGET)"'
+
+# Remove EDK II build output
 clean:
-	rm -rf $(BLD_DIR) $(TARGET)
+	rm -rf "$(WORKSPACE)/Build"
 
-run: $(TARGET)
-	cp $(TARGET) ./test/esp/EFI/BOOT/BOOTX64.EFI
-	qemu-system-x86_64 \
-    	-machine q35 \
-    	-m 256M \
-    	-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
-    	-drive if=pflash,format=raw,file=test/OVMF_VARS.fd \
-    	-drive format=raw,file=fat:rw:test/esp \
-    	-net none
-.PHONY: all run clean
+run: build
+	@mkdir -p "$(ESP_DIR)/EFI/BOOT"
+	@cp "$(EFI_APP)" "$(EFI_BOOT)"
+	@test -f "$(OVMF_VARS)" || cp "$(OVMF_VARS_TEMPLATE)" "$(OVMF_VARS)"
+	$(QEMU) \
+		-machine q35 \
+		-m 256M \
+		-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
+		-drive if=pflash,format=raw,file="$(OVMF_VARS)" \
+		-drive format=raw,file=fat:rw:$(ESP_DIR) \
+		-net none
+	
 
+.PHONY: all config build clean

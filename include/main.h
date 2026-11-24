@@ -1,8 +1,8 @@
 #ifndef MAIN
 #define MAIN
 
-#include <efi.h>
-#include <efilib.h>
+#include <Uefi.h>
+#include <Library/UefiLib.h>
 
 #define DEBUG_PORT 0x462
 

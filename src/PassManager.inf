@@ -1,0 +1,19 @@
+[Defines]
+  INF_VERSION    = 0x0001001B
+  BASE_NAME      = PassManager
+  FILE_GUID      = 7C2E9A51-4D83-4F16-B5A0-8E6D3C1F9274
+  MODULE_TYPE    = UEFI_APPLICATION
+  VERSION_STRING = 1.0
+  ENTRY_POINT    = UefiMain
+
+[Sources]
+  main.c
+  debug_helpers.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  UEFIPasswordManager.dec
+
+[LibraryClasses]
+  UefiApplicationEntryPoint
+  UefiLib
